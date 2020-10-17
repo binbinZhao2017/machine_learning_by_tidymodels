@@ -9,7 +9,7 @@
 <meta http-equiv="X-UA-Compatible" content="IE=EDGE" />
 
 
-<meta name="author" content="Green Valley Bioinformatics Core" />
+<meta name="author" content="Binbin Zhao" />
 
 <meta name="date" content="2020-09-10" />
 
@@ -4304,12 +4304,12 @@ div.tocify {
 <span id="cb13-2"><a href="#cb13-2"></a>rf_tune_results <span class="op">%&gt;%</span><span class="st"> </span><span class="kw">collect_metrics</span>()</span></code></pre></div>
 <pre><code>## # A tibble: 6 x 7
 ##    mtry .metric  .estimator  mean     n std_err .config
-##   &lt;dbl&gt; &lt;chr&gt;    &lt;chr&gt;      &lt;dbl&gt; &lt;int&gt;   &lt;dbl&gt; &lt;chr&gt;  
-## 1     3 accuracy binary     0.818    50  0.0210 Model1 
-## 2     3 roc_auc  binary     0.94     50  0.0154 Model1 
-## 3     4 accuracy binary     0.819    50  0.0202 Model2 
-## 4     4 roc_auc  binary     0.938    50  0.0140 Model2 
-## 5     5 accuracy binary     0.825    50  0.0204 Model3 
+##   &lt;dbl&gt; &lt;chr&gt;    &lt;chr&gt;      &lt;dbl&gt; &lt;int&gt;   &lt;dbl&gt; &lt;chr&gt;
+## 1     3 accuracy binary     0.818    50  0.0210 Model1
+## 2     3 roc_auc  binary     0.94     50  0.0154 Model1
+## 3     4 accuracy binary     0.819    50  0.0202 Model2
+## 4     4 roc_auc  binary     0.938    50  0.0140 Model2
+## 5     5 accuracy binary     0.825    50  0.0204 Model3
 ## 6     5 roc_auc  binary     0.937    50  0.0150 Model3</code></pre>
 <p>Across both accuracy and AUC, the best performance (<em>just</em>) can be selected.</p>
 </div>
@@ -4321,7 +4321,7 @@ div.tocify {
 <span id="cb15-2"><a href="#cb15-2"></a>param_final</span></code></pre></div>
 <pre><code>## # A tibble: 1 x 2
 ##    mtry .config
-##   &lt;dbl&gt; &lt;chr&gt;  
+##   &lt;dbl&gt; &lt;chr&gt;
 ## 1     3 Model1</code></pre>
 <p>Then we can add this parameter to the workflow using the <code>finalize_workflow()</code> function.</p>
 <div class="sourceCode" id="cb17"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb17-1"><a href="#cb17-1"></a>rf_workflow &lt;-<span class="st"> </span>rf_workflow <span class="op">%&gt;%</span></span>
@@ -4336,10 +4336,10 @@ div.tocify {
 <p>Note that the fit object that is created is a data-frame-like object; specifically, it is a tibble with list columns.</p>
 <div class="sourceCode" id="cb19"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb19-1"><a href="#cb19-1"></a>rf_fit</span></code></pre></div>
 <pre><code>## # Resampling results
-## # Monte Carlo cross-validation (0.67/0.33) with 1 resamples  
+## # Monte Carlo cross-validation (0.67/0.33) with 1 resamples
 ## # A tibble: 1 x 6
 ##   splits       id           .metrics      .notes       .predictions    .workflow
-##   &lt;list&gt;       &lt;chr&gt;        &lt;list&gt;        &lt;list&gt;       &lt;list&gt;          &lt;list&gt;   
+##   &lt;list&gt;       &lt;chr&gt;        &lt;list&gt;        &lt;list&gt;       &lt;list&gt;          &lt;list&gt;
 ## 1 &lt;split [29/… train/test … &lt;tibble [2 ×… &lt;tibble [0 … &lt;tibble [14 × … &lt;workflo…</code></pre>
 <p>This is a really nice feature of tidymodels (and is what makes it work so nicely with the tidyverse) since you can do all of your tidyverse operations to the model object. While truly taking advantage of this flexibility requires proficiency with purrr, if you don’t want to deal with purrr and list-columns, there are functions that can extract the relevant information from the fit object that remove the need for purrr as we will see below.</p>
 <p>Since we supplied the train/test object when we fit the workflow, the metrics are evaluated on the <em>test</em> set. Now when we use the <code>collect_metrics()</code> function (recall we used this when tuning our parameters), it extracts the performance of the final model (since <code>rf_fit</code> now consists of a single final model) applied to the <em>test</em> set.</p>
@@ -4416,27 +4416,27 @@ div.tocify {
 <pre><code>## ══ Workflow [trained] ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
 ## Preprocessor: Recipe
 ## Model: rand_forest()
-## 
+##
 ## ── Preprocessor ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 ## 2 Recipe Steps
-## 
+##
 ## ● step_log()
 ## ● step_normalize()
-## 
+##
 ## ── Model ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 ## Ranger result
-## 
+##
 ## Call:
-##  ranger::ranger(formula = ..y ~ ., data = data, mtry = ~3, importance = ~&quot;impurity&quot;,      num.threads = 1, verbose = FALSE, seed = sample.int(10^5,          1), probability = TRUE) 
-## 
-## Type:                             Probability estimation 
-## Number of trees:                  500 
-## Sample size:                      43 
-## Number of independent variables:  20 
-## Mtry:                             3 
-## Target node size:                 10 
-## Variable importance mode:         impurity 
-## Splitrule:                        gini 
+##  ranger::ranger(formula = ..y ~ ., data = data, mtry = ~3, importance = ~&quot;impurity&quot;,      num.threads = 1, verbose = FALSE, seed = sample.int(10^5,          1), probability = TRUE)
+##
+## Type:                             Probability estimation
+## Number of trees:                  500
+## Sample size:                      43
+## Number of independent variables:  20
+## Mtry:                             3
+## Target node size:                 10
+## Variable importance mode:         impurity
+## Splitrule:                        gini
 ## OOB prediction error (Brier s.):  0.1364934</code></pre>
 </div>
 <div id="variable-importance" class="section level2">
@@ -4445,18 +4445,18 @@ div.tocify {
 <div class="sourceCode" id="cb33"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb33-1"><a href="#cb33-1"></a>ranger_obj &lt;-<span class="st"> </span><span class="kw">pull_workflow_fit</span>(final_model)<span class="op">$</span>fit</span>
 <span id="cb33-2"><a href="#cb33-2"></a>ranger_obj</span></code></pre></div>
 <pre><code>## Ranger result
-## 
+##
 ## Call:
-##  ranger::ranger(formula = ..y ~ ., data = data, mtry = ~3, importance = ~&quot;impurity&quot;,      num.threads = 1, verbose = FALSE, seed = sample.int(10^5,          1), probability = TRUE) 
-## 
-## Type:                             Probability estimation 
-## Number of trees:                  500 
-## Sample size:                      43 
-## Number of independent variables:  20 
-## Mtry:                             3 
-## Target node size:                 10 
-## Variable importance mode:         impurity 
-## Splitrule:                        gini 
+##  ranger::ranger(formula = ..y ~ ., data = data, mtry = ~3, importance = ~&quot;impurity&quot;,      num.threads = 1, verbose = FALSE, seed = sample.int(10^5,          1), probability = TRUE)
+##
+## Type:                             Probability estimation
+## Number of trees:                  500
+## Sample size:                      43
+## Number of independent variables:  20
+## Mtry:                             3
+## Target node size:                 10
+## Variable importance mode:         impurity
+## Splitrule:                        gini
 ## OOB prediction error (Brier s.):  0.1364934</code></pre>
 <p>Then you can extract the variable importance from the ranger object itself (<code>variable.importance</code> is a specific object contained within ranger output - this will need to be adapted for the specific object type of other models).</p>
 <div class="sourceCode" id="cb35"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb35-1"><a href="#cb35-1"></a>ranger_obj_importance &lt;-<span class="st"> </span>ranger_obj<span class="op">$</span>variable.importance <span class="op">%&gt;%</span><span class="st"> </span><span class="kw">data.frame</span>()</span>
@@ -4512,20 +4512,20 @@ div.tocify {
 <span id="cb42-12"><a href="#cb42-12"></a><span class="kw">predict</span>(df_ranger, df_testing)</span></code></pre></div>
 <pre><code>## # A tibble: 14 x 1
 ##    .pred_class
-##    &lt;fct&gt;      
-##  1 AD         
-##  2 AD         
-##  3 aMCI       
-##  4 aMCI       
-##  5 AD         
-##  6 AD         
-##  7 AD         
-##  8 AD         
-##  9 aMCI       
-## 10 aMCI       
-## 11 aMCI       
-## 12 aMCI       
-## 13 AD         
+##    &lt;fct&gt;
+##  1 AD
+##  2 AD
+##  3 aMCI
+##  4 aMCI
+##  5 AD
+##  6 AD
+##  7 AD
+##  8 AD
+##  9 aMCI
+## 10 aMCI
+## 11 aMCI
+## 12 aMCI
+## 13 AD
 ## 14 AD</code></pre>
 <div class="sourceCode" id="cb44"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb44-1"><a href="#cb44-1"></a>df_ranger <span class="op">%&gt;%</span></span>
 <span id="cb44-2"><a href="#cb44-2"></a><span class="st">  </span><span class="kw">predict</span>(df_testing) <span class="op">%&gt;%</span></span>
