@@ -1,0 +1,513 @@
+---
+title: 'Tidymodels: tidy machine learning in R'
+author: "Green Valley Bioinformatics Core"
+date: '`r format(Sys.Date(), "%B %d, %Y")`'
+output:
+  html_document:
+    number_sections: no
+    toc: yes
+    toc_depth: 6
+    toc_float: true
+    self_contained: true
+    thumbnails: true
+    lightbox: true
+    gallery: true
+    use_bookdown: false
+    highlight: haddock
+type: post
+description: modified from https://github.com/rlbarter
+---
+
+The main resources to learn tidymodels were Alison Hill's slides from [Introduction to Machine Learning with the Tidyverse](https://education.rstudio.com/blog/2020/02/conf20-intro-ml/), which contains all the slides for the course she prepared with Garrett Grolemund for RStudio::conf(2020), and Edgar Ruiz's [Gentle introduction to tidymodels](https://rviews.rstudio.com/2019/06/19/a-gentle-intro-to-tidymodels/) on the RStudio website.  
+
+# Objectives
+
+<br/>  	KEGG enzyme of Metagenome data from the sixth hospital is as the input for analysis. 
+
+<br/>  	The results below demonstrate the comparison of group(NC, AD and aMCI).
+
+<br/>  	To get the variable importance by machine learning.
+
+# Getting set up
+
+
+First we need to load some libraries: `tidymodels` and `tidyverse`. 
+
+```{r, message=FALSE}
+# load the relevant tidymodels libraries
+library(tidymodels)
+library(tidyverse)
+library(workflows)
+library(tune)
+library(here)
+library(readxl)
+library("Hotelling")
+library(DT)
+library(recipeselectors)
+library("yardstick")
+library(RCurl)
+library(xgboost)
+library(glmnet)
+# load the dataset
+```
+
+
+```{r, message=FALSE}
+
+df <- read.csv("./data/data/transform_data_KO.csv")
+
+```
+
+
+# Clean data
+```{r, message=FALSE}
+df.filter <- subset(df, Diagnosis != "aMCI")
+df.filter$Diagnosis<-factor(df.filter$Diagnosis)
+target_group<-unique(df.filter$Diagnosis) %>% as.character()
+
+df.filter.clean <- df.filter[,-c(1)]
+colnames(df.filter.clean)[1] <- "Diagnosis"
+
+# you can select some columns which you want to use
+df.filter.clean_colnames<-colnames(df.filter.clean)
+
+# remove the row of NA for df.filter.clean
+rownames(df.filter.clean) <- NULL
+df.filter.clean<-df.filter.clean %>% mutate_if(is.numeric, function(x){x+1}) 
+
+```
+
+# Select top20 features
+```{r}
+#####################
+# Define a recipe
+sixthhospital_recipe_all <- 
+  # which consists of the formula (outcome ~ predictors)
+  recipe(Diagnosis ~ ., data = df.filter.clean) %>%
+  # and some pre-processing steps
+  step_log(all_numeric()) %>%
+  # Hotelling::clr() %>% 
+  step_normalize(all_numeric()) 
+
+sixthhospital_all_top20<- sixthhospital_recipe_all %>%
+  step_select_roc( all_predictors() , top_p=20, outcome="Diagnosis") %>%
+  # apply the recipe to the training data
+  prep() %>%
+  # extract the pre-processed training dataset
+  juice()
+
+colnames_top<-names(sixthhospital_all_top20)
+
+#get a filter dataframe(top20)
+df.filter.clean.top<-df.filter.clean[,colnames_top]
+```
+
+# Split train and test data
+```{r}
+set.seed(123)
+# split the data into trainng (66%) and testing (33%)
+sixthhospital_split <- initial_split(df.filter.clean.top, prop = 2/3)
+sixthhospital_split
+
+# extract training and testing sets
+sixthhospital_train <- training(sixthhospital_split)
+sixthhospital_test <- testing(sixthhospital_split)
+#####################
+```
+
+# Define a new recipe
+```{r}
+sixthhospital_recipe <- 
+  # which consists of the formula (outcome ~ predictors)
+  recipe(Diagnosis ~ ., data = sixthhospital_train) %>%
+  # and some pre-processing steps
+  step_log(all_numeric()) %>%
+  # Hotelling::clr() %>% 
+  step_normalize(all_numeric()) %>%  
+  prep(sixthhospital_train) 
+  # %>% juice()
+
+#get train and test data preprocessed 
+sixthhospital_train_preprocessed <- bake(sixthhospital_recipe, sixthhospital_train)
+sixthhospital_test_preprocessed <- bake(sixthhospital_recipe, sixthhospital_test)
+
+# create CV object from training data
+set.seed(1234)
+sixthhospital_cv <- vfold_cv(sixthhospital_train, v = 5, repeats = 10, strata = "Diagnosis")
+```
+
+# Method1
+
+## Specify the model
+
+
+So far we've split our data into training/testing, and we've specified our pre-processing steps using a recipe. The next thing we want to specify is our model (using the `parsnip` package).
+
+Parsnip offers a unified interface for the massive variety of models that exist in R. This means that you only have to learn one way of specifying a model, and you can use this specification and have it generate a linear model, a random forest model, a support vector machine model, and more with a single line of code.
+
+There are a few primary components that you need to provide for the model specification
+
+
+1. The **model type**: what kind of model you want to fit, set using a different function depending on the model, such as `rand_forest()` for random forest, `logistic_reg()` for logistic regression, `svm_poly()` for a polynomial SVM model etc. The full list of models available via parsnip can be found [here](https://tidymodels.github.io/parsnip/articles/articles/Models.html).
+
+1. The **arguments**: the model parameter values (now consistently named across different models), set using `set_args()`.
+
+1. The **engine**: the underlying package the model should come from (e.g. "ranger" for the ranger implementation of Random Forest), set using `set_engine()`.
+
+1. The **mode**: the type of prediction - since several packages can do both classification (binary/categorical prediction) and regression (continuous prediction), set using `set_mode()`.
+
+
+For instance, if we want to fit a random forest model as implemented by the `ranger` package for the purpose of classification and we want to tune the `mtry` parameter (the number of randomly selected variables to be considered at each split in the trees), then we would define the following model specification:
+
+
+```{r}
+rf_model <- 
+  # specify that the model is a random forest
+  rand_forest() %>%
+  # specify that the `mtry` parameter needs to be tuned
+  set_args(mtry = tune()) %>%
+  # select the engine/package that underlies the model
+  set_engine("ranger", importance = "impurity") %>%
+  # choose either the continuous regression or binary classification mode
+  set_mode("classification") 
+```
+
+If you want to be able to examine the variable importance of your final model later, you will need to set `importance` argument when setting the engine. For ranger, the importance options are `"impurity"` or `"permutation"`.
+
+As another example, the following code would instead specify a logistic regression model from the `glm` package.
+
+```{r}
+lr_model <- 
+  # specify that the model is a random forest
+  logistic_reg() %>%
+  # select the engine/package that underlies the model
+  set_engine("glm") %>%
+  # choose either the continuous regression or binary classification mode
+  set_mode("classification") 
+```
+
+
+Note that this code doesn't actually fit the model. Like the recipe, it just outlines a description of the model. Moreover, setting a parameter to `tune()` means that it will be tuned later in the tune stage of the pipeline (i.e. the value of the parameter that yields the best performance will be chosen). You could also just specify a particular value of the parameter if you don't want to tune it e.g. using `set_args(mtry = 4)`.
+
+
+## Put it all together in a workflow
+
+We're now ready to put the model and recipes together into a workflow. You initiate a workflow using `workflow()` (from the `workflows` package) and then you can add a recipe and add a model to it.
+
+
+```{r}
+# set the workflow
+rf_workflow <- workflow() %>%
+  # add the recipe
+  add_recipe(sixthhospital_recipe) %>%
+  # add the model
+  add_model(rf_model)
+```
+
+
+Note that we still haven't yet implemented the pre-processing steps in the recipe nor have we fit the model. We've just written the framework. It is only when we tune the parameters or fit the model that the recipe and model frameworks are actually implemented.
+
+## Tune the parameters
+
+Since we had a parameter that we designated to be tuned (`mtry`), we need to tune it (i.e. choose the value that leads to the best performance) before fitting our model. If you don't have any parameters to tune, you can skip this step.
+
+Note that we will do our tuning using the cross-validation object (`sixthhospital_cv`). To do this, we specify the range of `mtry` values we want to try, and then we add a tuning layer to our workflow using `tune_grid()` (from the `tune` package). Note that we focus on two metrics: `accuracy` and `roc_auc` (from the `yardstick` package).
+
+```{r}
+# specify which values to try
+rf_grid <- expand.grid(mtry = c(3,4,5))
+# extract results
+rf_tune_results <- rf_workflow %>%
+  tune_grid(resamples = sixthhospital_cv, #CV object
+            grid = rf_grid, # grid of values to try
+            metrics = metric_set(accuracy, roc_auc) # metrics we care about
+            )
+```
+
+You can tune multiple parameters at once by providing multiple parameters to the `expand.grid()` function, e.g. `expand.grid(mtry = c(3, 4, 5), trees = c(100, 500))`.
+
+It's always a good idea to explore the results of the cross-validation. `collect_metrics()` is a really handy function that can be used in a variety of circumstances to extract any metrics that have been calculated within the object it's being used on. In this case, the metrics come from the cross-validation performance across the different values of the parameters.
+
+```{r}
+# print results
+rf_tune_results %>% collect_metrics()
+```
+
+Across both accuracy and AUC, the best performance (*just*) can be selected.
+
+
+## Finalize the workflow
+
+We want to add a layer to our workflow that corresponds to the tuned parameter, i.e. sets `mtry` to be the value that yielded the best results. If you didn't tune any parameters, you can skip this step.
+
+We can extract the best value for the roc_auc metric by applying the `select_best()` function to the tune object.
+
+```{r}
+param_final <- rf_tune_results %>% select_best(metric = "roc_auc")
+param_final
+```
+
+Then we can add this parameter to the workflow using the `finalize_workflow()` function.
+
+```{r}
+rf_workflow <- rf_workflow %>%
+  finalize_workflow(param_final)
+```
+
+## Evaluate the model on the test set
+
+Now we've defined our recipe, our model, and tuned the model's parameters, we're ready to actually fit the final model. Since all of this information is contained within the workflow object, we will apply the `last_fit()` function to our workflow and our train/test split object. This will automatically train the model specified by the workflow using the training data, and produce evaluations based on the test set.
+
+```{r}
+rf_fit <- rf_workflow %>%
+  # fit on the training set and evaluate on test set
+  last_fit(sixthhospital_split)
+```
+
+
+Note that the fit object that is created is a data-frame-like object; specifically, it is a tibble with list columns.
+
+```{r}
+rf_fit
+```
+
+This is a really nice feature of tidymodels (and is what makes it work so nicely with the tidyverse) since you can do all of your tidyverse operations to the model object. While truly taking advantage of this flexibility requires proficiency with purrr, if you don't want to deal with purrr and list-columns, there are functions that can extract the relevant information from the fit object that remove the need for purrr as we will see below.
+
+
+Since we supplied the train/test object when we fit the workflow, the metrics are evaluated on the *test* set. Now when we use the `collect_metrics()` function (recall we used this when tuning our parameters), it extracts the performance of the final model (since `rf_fit` now consists of a single final model) applied to the *test* set.
+
+
+```{r}
+test_performance <- rf_fit %>% collect_metrics()
+test_performance
+```
+
+Overall the performance is very good.
+
+You can also extract the test set predictions themselves using the `collect_predictions()` function. Note that there are 192 rows in the predictions object below which matches the number of *test set* observations (just to give you some evidence that these are based on the test set rather than the training set).
+
+
+```{r}
+# generate predictions from the test set
+test_predictions <- rf_fit %>% collect_predictions()
+test_predictions$Value<- test_predictions[,c(paste0(".pred_",target_group[1]))] %>% unlist()
+# test_predictions <- rf_fit %>% pull(.predictions) ## purrr function
+test_predictions
+```
+
+
+Since this is just a normal data frame/tibble object, we can generate summaries and plots such as a confusion matrix.
+
+```{r}
+# generate a confusion matrix
+cm <- test_predictions %>% 
+  conf_mat(truth = Diagnosis, estimate = .pred_class)
+autoplot(cm, type = "heatmap")
+
+```
+
+We could also plot distributions of the predicted probability distributions for each class.
+
+```{r}
+test_predictions %>%
+  ggplot( aes_string(x = "Value" , fill = 'Diagnosis') ) +
+  geom_density( alpha = 0.5)
+```
+
+
+
+```{r}
+test_predictions
+roc_curve(test_predictions, Diagnosis,Value )%>% autoplot()
+```
+
+
+## Fitting and using your final model (You may skip all steps below because it is for external validation)
+
+The previous section evaluated the model trained on the training data using the testing data. But once you've determined your final model, you often want to train it on your full dataset and then use it to predict the response for *new* data.
+
+
+If you want to use your model to predict the response for new observations, you need to use the `fit()` function on your workflow and the dataset that you want to fit the final model on (e.g. the complete training + testing dataset). Below I use our own original dataset, but actually we should do it on external dataset.
+
+```{r}
+final_model <- fit(rf_workflow, df.filter.clean)
+```
+
+The `final_model` object contains a few things including the ranger object trained with the parameters established through the workflow contained in `rf_workflow` based on the data in `sixthhospital.clean` (the combined training and testing data).
+
+
+```{r}
+final_model
+```
+
+
+## Variable importance 
+
+If you want to extract the variable importance scores from your model, as far as I can tell, for now you need to extract the model object from the `fit()` object (which for us is called `final_model`). The function that extracts the model is `pull_workflow_fit()` and then you need to grab the `fit` object that the output contains.
+
+```{r}
+ranger_obj <- pull_workflow_fit(final_model)$fit
+ranger_obj
+```
+
+
+Then you can extract the variable importance from the ranger object itself (`variable.importance` is a specific object contained within ranger output - this will need to be adapted for the specific object type of other models).
+
+```{r}
+ranger_obj_importance <- ranger_obj$variable.importance %>% data.frame()
+ranger_obj_importance$feature<-rownames(ranger_obj_importance)
+ranger_obj_importance$value<-ranger_obj_importance$.
+ranger_obj_importance$.<-NULL
+ranger_obj_importance$.<-NULL
+```
+```{r fig.width=6,fig.height=9}
+print(ranger_obj_importance$feature)
+
+# ko<-c("ko00010","ko00020","ko00030")
+ko<- ranger_obj_importance$feature
+# get name
+print(length(ko))  
+ko_names <- c()
+for (i in ko){
+  # ko_name <- getURL(paste0("http://togows.dbcls.jp/entry/pathway/",i,"/name"))
+  ko_name <- getURL(paste0("http://togows.org/entry/kegg-enzyme/",i,"/name"))
+  ko_names <- c(ko_names,ko_name)
+}
+ko_names <- gsub("\n","",ko_names)
+ranger_obj_importance$ko_names <- ko_names
+c2<-ggplot(ranger_obj_importance,aes(x=reorder(ko_names, abs(value) ), y=value) ) +
+  geom_bar(stat="identity", position=position_dodge() ,fill="red") +  
+  coord_flip()+
+  theme_bw()+theme_minimal()+
+  theme( legend.position = "right",axis.title.x = element_blank(),axis.text.x =element_text(angle = 0),axis.title.y = element_blank()  )+
+  theme(axis.title.x = element_text(size = 5))+
+  theme(axis.text.x = element_text(size = 6,color="black"),axis.text.y = element_text(size = 10,color="black"))+
+  ggtitle(label = paste0(target_group,collapse ='|') )
+c2
+DT::datatable(ranger_obj_importance)
+```
+
+
+# Method2
+```{r}
+#Model Training
+df_training<-sixthhospital_train_preprocessed
+df_testing<-sixthhospital_test_preprocessed
+df_ranger <- rand_forest(trees = 100, mode = "classification") %>%
+  set_engine("ranger") %>%
+  fit(Diagnosis ~ ., data = df_training)
+
+df_rf <-  rand_forest(trees = 100, mode = "classification") %>%
+  set_engine("randomForest",importance=T) %>%
+  fit(Diagnosis ~ ., data = df_training)
+
+df_lr <-logistic_reg(mode = "classification") %>%
+   set_engine("glm") %>%
+  fit(Diagnosis ~ ., data = df_training)
+
+# df_lr1 <-logistic_reg(mode = "classification") %>%
+#    set_engine("glmnet") %>%
+#   fit(Diagnosis ~ ., data = df_training)
+
+df_bt <-boost_tree(mode = "classification") %>%
+   set_engine("xgboost") %>%
+  fit(Diagnosis ~ ., data = df_training)
+
+#Predictions
+predict(df_ranger, df_testing)
+df_ranger %>%
+  predict(df_testing) %>%
+  bind_cols(df_testing) %>%
+  glimpse()
+
+df_lr %>%
+  predict(df_testing) %>%
+  bind_cols(df_testing) %>%
+  glimpse()
+
+df_bt %>%
+  predict(df_testing) %>%
+  bind_cols(df_testing) %>%
+  glimpse()
+
+#Model Validation
+df_ranger %>%
+  predict(df_testing) %>%
+  bind_cols(df_testing) %>%
+  metrics(truth = Diagnosis, estimate = .pred_class)
+
+df_rf %>%
+  predict(df_testing) %>%
+  bind_cols(df_testing) %>%
+  metrics(truth = Diagnosis, estimate = .pred_class)
+
+df_lr %>%
+  predict(df_testing) %>%
+  bind_cols(df_testing) %>%
+  metrics(truth = Diagnosis, estimate = .pred_class)
+
+# df_lr1 %>%
+#   predict(df_testing) %>%
+#   bind_cols(df_testing) %>%
+#   metrics(truth = Diagnosis, estimate = .pred_class)
+
+df_bt %>%
+  predict(df_testing) %>%
+  bind_cols(df_testing) %>%
+  metrics(truth = Diagnosis, estimate = .pred_class)
+
+#Per classifier metrics
+df_probs <- df_ranger %>%
+  predict(df_testing, type = "prob") %>%
+  bind_cols(df_testing)
+
+roc_fig <- predict(df_ranger, df_testing, type = "prob") %>%
+    bind_cols(predict(df_ranger, df_testing)) %>%
+    bind_cols(dplyr::select(df_testing, Diagnosis))
+roc_fig$V1 <- as.data.frame(roc_fig)[,1]
+
+roc_fig_lr <- predict(df_lr, df_testing, type = "prob") %>%
+    bind_cols(predict(df_lr, df_testing)) %>%
+    bind_cols(dplyr::select(df_testing, Diagnosis))
+roc_fig_lr$V1 <- as.data.frame(roc_fig_lr)[,1]
+
+# roc_fig_lr1 <- multi_predict(df_lr1, df_testing, type = "prob") %>%
+#     bind_cols(multi_predict(df_lr1, df_testing)) %>%
+#     bind_cols(dplyr::select(df_testing, Diagnosis))
+# roc_fig_lr1$V1 <- as.data.frame(roc_fig_lr1)[,1]
+
+roc_fig_bt <- predict(df_bt, df_testing, type = "prob") %>%
+    bind_cols(predict(df_bt, df_testing)) %>%
+    bind_cols(dplyr::select(df_testing, Diagnosis))
+roc_fig_bt$V1 <- as.data.frame(roc_fig_bt)[,1]
+
+#get aac auc
+# predict(df_ranger, df_testing, type = "prob") %>%
+#     bind_cols(predict(df_ranger, df_testing)) %>%
+#     bind_cols(select(df_testing, Diagnosis)) %>%
+yardstick::metrics(roc_fig, Diagnosis,  estimate = .pred_class, V1)
+yardstick::metrics(roc_fig_lr, Diagnosis,  estimate = .pred_class, V1)
+# yardstick::metrics(roc_fig_lr1, Diagnosis,  estimate = .pred_class, V1)
+yardstick::metrics(roc_fig_bt, Diagnosis,  estimate = .pred_class, V1)
+
+#plot ROC
+roc_curve(roc_fig, Diagnosis,V1 )%>% autoplot()
+roc_curve(roc_fig_lr, Diagnosis,V1 )%>% autoplot()
+# roc_curve(roc_fig_lr1, Diagnosis,V1 )%>% autoplot()
+roc_curve(roc_fig_bt, Diagnosis,V1 )%>% autoplot()
+
+
+#fearure importance
+ko <- rownames(df_rf$fit$importance)
+ko_names <- c()
+for (i in ko){
+  # ko_name <- getURL(paste0("http://togows.dbcls.jp/entry/pathway/",i,"/name"))
+  ko_name <- getURL(paste0("http://togows.org/entry/kegg-enzyme/",i,"/name"))
+  ko_names <- c(ko_names,ko_name)
+}
+ko_names <- gsub("\n","",ko_names)
+df_rf_imp<- cbind(rownames(df_rf$fit$importance), df_rf$fit$importance, ko_names) %>% as_tibble() %>% dplyr::select(predictor= V1, MeanDecreaseAccuracy, enzyme = ko_names)   %>% 
+ mutate(MeanDecreaseAccuracy=as.numeric(MeanDecreaseAccuracy)) %>% arrange(desc((MeanDecreaseAccuracy)))
+datatable(df_rf_imp)
+```
+
